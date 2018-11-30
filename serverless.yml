@@ -1,0 +1,102 @@
+service: Pizzeria
+
+plugins:
+  - serverless-dynamodb-autoscaling
+  - serverless-domain-manager
+
+custom:
+  capacities:
+    - table: TablaDePedidosProcesados
+      read:
+        minimum: 1
+        maximum: 10
+        usage: 0.75
+      write:
+        minimum: 1
+        maximum: 10
+        usage: 0.5
+  customDomain:
+    domainName: pizzeria.albertomarin.info
+    basePath: api
+    createRoute53Record: true
+    certificateName: '*.albertomarin.info'
+    
+provider:
+  name: aws
+  runtime: nodejs8.10
+  region: us-east-1
+  environment:
+    REGION: ${self:provider.region}
+    PENDING_ORDERS_QUEUE_URL:
+      Ref: ColaDePedidosPendientes
+    PENDING_ORDERS_QUEUE_NAME: PendingOrders
+    PROCESSED_ORDERS_TABLE_NAME: ProcessedOrders
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "sqs:SendMessage"
+      Resource: "arn:aws:sqs:${self:provider.region}:*:${self:provider.environment.PENDING_ORDERS_QUEUE_NAME}"
+    - Effect: "Allow"
+      Action:
+        - "dynamodb:GetItem"
+        - "dynamodb:PutItem"
+        - "dynamodb:UpdateItem"
+        - "dynamodb:DeleteItem"
+      Resource:
+        - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.PROCESSED_ORDERS_TABLE_NAME}"
+
+functions:
+  makeOrder:
+    handler: handler.makeOrder
+    events:
+      - http:
+          path: order
+          method: post
+  processOrder:
+    handler: handler.processOrder
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - ColaDePedidosPendientes
+              - Arn
+          batchSize: 1
+  deliverOrder:
+    handler: handler.deliverOrder
+    events:
+      - stream:
+          type: dynamodb
+          batchSize: 1
+          startingPosition: LATEST
+          arn:
+            Fn::GetAtt:
+              - TablaDePedidosProcesados
+              - StreamArn
+  getOrderStatus:
+    handler: handler.getOrderStatus
+    events:
+      - http:
+          path: order/{orderId}
+          method: get
+
+resources:
+  Resources:
+    ColaDePedidosPendientes:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: ${self:provider.environment.PENDING_ORDERS_QUEUE_NAME}
+    TablaDePedidosProcesados:
+      Type: "AWS::DynamoDB::Table"
+      Properties:
+        AttributeDefinitions:
+        - AttributeName: "orderId"
+          AttributeType: "S"
+        KeySchema:
+        - AttributeName: "orderId"
+          KeyType: "HASH"
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:provider.environment.PROCESSED_ORDERS_TABLE_NAME}
+        StreamSpecification:
+          StreamViewType: NEW_IMAGE
