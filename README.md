@@ -4,4 +4,7 @@ Aplicación ejemplo del curso [Serverless en Español con AWS y Serverless Frame
 
 
 
+
+---
 ![Arquitectura](https://github.com/amar1n/Pizzeria/blob/master/Pizzeria.svg)
+---
